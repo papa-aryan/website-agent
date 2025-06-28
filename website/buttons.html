@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent Test Site - Buttons</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Button Challenge</h1>
+        <p>Your goal is to find and click the special button.</p>
+        
+        <button class="button button-grey">Just a Regular Button</button>
+        <button id="special-button" class="button button-action" onclick="changeButton()">Click Me!</button>
+        <button class="button button-grey">Another Regular Button</button>
+        
+        <p id="message" class="hidden">Success! You found the special button!</p>
+        
+        <br>
+        <a href="index.html">Go Back Home</a>
+    </div>
+
+    <script>
+        function changeButton() {
+            const specialButton = document.getElementById('special-button');
+            const message = document.getElementById('message');
+            specialButton.textContent = 'Clicked!';
+            specialButton.style.backgroundColor = '#28a745'; // Green
+            message.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

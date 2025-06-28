@@ -1,0 +1,16 @@
+# Environment variables
+# Never commit secrets!
+agent/.env
+
+# Python virtual environment
+agent/agent-venv/
+
+# Python cache files
+**/__pycache__/
+*.pyc
+
+# Generated files from agent
+agent/screenshot.png
+
+# IDE-specific settings
+.vscode/
