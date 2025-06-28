@@ -6,6 +6,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from io import BytesIO
 import base64
+import json
 
 class WebAgent:
     def __init__(self):
@@ -51,6 +52,22 @@ class WebAgent:
             "mime_type": "image/png",
             "data": img_bytes
         }
+    
+    def ask_gemini_about_image(self, image_part, prompt):
+        """
+        Sends the image and a prompt to the Gemini model and gets a response.
+        """
+        if not image_part:
+            print("Cannot ask Gemini without an image.")
+            return None
+        
+        print("Asking Gemini to analyze the screenshot...")
+        try:
+            response = self.model.generate_content([prompt, image_part])
+            return response.text
+        except Exception as e:
+            print(f"An error occurred while calling Gemini API: {e}")
+            return None
             
     def run(self):
         """
@@ -68,6 +85,32 @@ class WebAgent:
         image_part = self.get_screenshot_as_gemini_part()
         if image_part:
             print("Screenshot converted and ready for Gemini.")
+        if not image_part:
+            print("Agent run failed: Could not prepare screenshot.")
+            return
+        
+        # --- Step 6: Send to Gemini with a Prompt ---
+        prompt = """
+        Analyze the screenshot of the web page. The screen resolution is {screen_width}x{screen_height}.
+        Your task is to identify all interactive elements, including buttons, links, and text input fields.
+
+        Provide the output as a JSON object with a single key "elements".
+        The value of "elements" should be a list of objects. Each object must have:
+        1. "label": The text content or a short description of the element (e.g., "Submit Information", "Your Name").
+        2. "type": The type of element, which must be one of the following strings: "button", "link", or "input".
+        3. "box_2d": The bounding box coordinates as a list of four numbers [x_min, y_min, x_max, y_max].
+
+        Return only the raw JSON object, without any surrounding text, explanations, or markdown formatting.
+        """
+        print("Prompting Gemini...")
+        gemini_response = self.ask_gemini_about_image(image_part, prompt)
+        
+        if gemini_response:
+            print("\n--- Gemini Response ---")
+            print(gemini_response)
+            print("-----------------------\n")
+        else:
+            print("Did not receive a response from Gemini.")
 
 
 def main():
@@ -80,7 +123,7 @@ def main():
     #for m in genai.list_models():
     #    if 'generateContent' in m.supported_generation_methods:
     #        print(m.name)
-    
+
     agent.run()
 
 

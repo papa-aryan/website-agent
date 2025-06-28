@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch, MagicMock
 import os
 from PIL import Image
 from agent_logic import WebAgent
@@ -82,6 +83,53 @@ class TestWebAgent(unittest.TestCase):
 
         # 3. Assert the result
         self.assertIsNone(image_part)
+
+    def test_ask_gemini_about_image_no_image(self):
+        """
+        Tests that the Gemini call is not made if there is no image.
+        """
+        print("\n[Debug] Starting test_ask_gemini_about_image_no_image...")
+        response = self.agent.ask_gemini_about_image(None, "test prompt")
+        self.assertIsNone(response)
+
+    @patch('google.generativeai.GenerativeModel.generate_content')
+    def test_ask_gemini_about_image_success(self, mock_generate_content):
+        """
+        Tests a successful call to the Gemini API using a mock.
+        """
+        print("\n[Debug] Starting test_ask_gemini_about_image_success...")
+        # 1. Setup the mock
+        # Create a fake response object with a 'text' attribute
+        fake_response = MagicMock()
+        fake_response.text = '{"elements": []}'
+        mock_generate_content.return_value = fake_response
+
+        # 2. Call the method
+        dummy_image_part = {"mime_type": "image/png", "data": b"dummyimagedata"}
+        prompt = "test prompt"
+        response_text = self.agent.ask_gemini_about_image(dummy_image_part, prompt)
+
+        # 3. Assert the results
+        # Check that our mock was called with the right arguments
+        mock_generate_content.assert_called_once_with([prompt, dummy_image_part])
+        # Check that our method returned the text from the fake response
+        self.assertEqual(response_text, '{"elements": []}')
+
+    @patch('google.generativeai.GenerativeModel.generate_content')
+    def test_ask_gemini_about_image_api_error(self, mock_generate_content):
+        """
+        Tests the handling of an API error using a mock.
+        """
+        print("\n[Debug] Starting test_ask_gemini_about_image_api_error...")
+        # 1. Setup the mock to raise an exception
+        mock_generate_content.side_effect = Exception("API Failure")
+
+        # 2. Call the method
+        dummy_image_part = {"mime_type": "image/png", "data": b"dummyimagedata"}
+        response = self.agent.ask_gemini_about_image(dummy_image_part, "test prompt")
+
+        # 3. Assert the result
+        self.assertIsNone(response)
 
 
 if __name__ == '__main__':
