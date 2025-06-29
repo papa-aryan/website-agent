@@ -16,10 +16,12 @@ class WebAgent:
         load_dotenv()
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise ValueError("API key not found. Please check your .env file.")
+            raise ValueError("GEMINI_API_KEY not found in .env file.")
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-2.5-flash-lite-preview-06-17')
         self.screenshot = None
+        self.history = []
+        self.max_iterations = 10
         print("WebAgent initialized!!")
 
     def take_screenshot(self):
@@ -68,6 +70,20 @@ class WebAgent:
         except Exception as e:
             print(f"An error occurred while calling Gemini API: {e}")
             return None
+        
+    def ask_gemini_text_only(self, prompt):
+        """
+        Sends a text-only prompt to the Gemini model.
+        """
+        print("Asking Gemini a text-only question...")
+        try:
+            # Note: We only pass the prompt, no image part.
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            print(f"An error occurred while calling Gemini API: {e}")
+            return None
+
             
     def parse_and_process_response(self, response_text, screen_size):
         """
@@ -133,7 +149,93 @@ class WebAgent:
         else:
             print(f"Unknown element type: {element_type}")
 
-    def run(self):
+    def construct_prompt(self, screen_width, screen_height):
+        """
+        Constructs the prompt for the Gemini model, including history.
+        """
+        history_str = "\n".join(self.history)
+        return f"""
+Analyze the screenshot of the web page. The screen resolution is {screen_width}x{screen_height}.
+The user's objective is: {self.history[0]}
+The history of my previous actions is:
+{history_str}
+
+Based on the user's objective and the history, your task is to identify ALL interactive elements that could help achieve the objective.
+These elements include buttons, links, and text input fields.
+
+Provide the output as a JSON object with a single key "elements".
+The value of "elements" should be a list of objects. Each object must have:
+1. "label": The text content or a short description of the element (e.g., "Submit Information", "Your Name").
+2. "type": The type of element, which must be one of the following strings: "button", "link", or "input".
+3. "box_2d": The bounding box coordinates as a list of four numbers [x_min, y_min, x_max, y_max].
+
+Return only the raw JSON object, without any surrounding text, explanations, or markdown formatting.
+"""
+
+    def decide_next_action(self, interactive_elements):
+        """
+        Asks the Gemini model to decide the next action to take.
+        """
+        prompt = f"""
+My main objective is: {self.history[0]}
+
+Here are the interactive elements I've identified on the current screen:
+{json.dumps(interactive_elements, indent=2)}
+
+My action history so far is:
+{"\n".join(self.history)}
+
+Your task is to choose the best element to interact with to get closer to achieving the main objective.
+Review the action history carefully. Has the objective already been accomplished in a previous step?
+The objective may require multiple steps and navigating through different pages (like a search function).
+Think step-by-step. If you don't see an element that directly accomplishes the objective, choose one that is a logical step towards it (e.g., a 'Next' button, a relevant link like 'Buttons Page', or a menu). If you get stuck, you can usually return to the homepage too to start over and explore a different branch.
+
+Please provide your response as a JSON object with two keys:
+1. "thought": A brief explanation of your reasoning.
+2. "chosen_element_label": The exact label of the element you've chosen from the list above.
+
+Example:
+{{
+  "thought": "To find the 'About' page, clicking the 'Menu' button seems like the most logical next step.",
+  "chosen_element_label": "Menu"
+}}
+
+If you think the objective has been met, please return an empty JSON object.
+Return only the raw JSON object.
+"""
+        print("Asking Gemini to decide on the next action...")
+        response_text = self.ask_gemini_text_only(prompt)
+
+        if not response_text:
+            return None, None
+
+        print("\n--- Gemini Decision ---")
+        print(response_text)
+        print("-----------------------\n")
+
+        try:
+            if response_text.strip().startswith("```json"):
+                response_text = response_text.strip()[7:-3].strip()
+            
+            decision_data = json.loads(response_text)
+            if not decision_data: # Empty object means goal is met
+                return None, "Objective achieved."
+
+            thought = decision_data.get("thought")
+            chosen_label = decision_data.get("chosen_element_label")
+
+            for element in interactive_elements:
+                if element.get("label") == chosen_label:
+                    return element, thought
+            
+            return None, "Could not find the chosen element."
+
+        except (json.JSONDecodeError, KeyError) as e:
+            print(f"Error parsing decision response: {e}")
+            print(f"Raw response was: {response_text}")
+            return None, None
+
+    def run(self, user_prompt):
         """
         The main execution loop for the agent.
         """
@@ -142,85 +244,74 @@ class WebAgent:
         time.sleep(5)
         print("Agent is now active.")
 
-        # --- Step 4: Take a Screenshot ---
-        self.take_screenshot()
+        self.history.append(f"User's objective: {user_prompt}")
 
-        # --- Step 5: Convert Screenshot for Gemini ---
-        image_part = self.get_screenshot_as_gemini_part()
-        if image_part:
-            print("Screenshot converted and ready for Gemini.")
-        if not image_part:
-            print("Agent run failed: Could not prepare screenshot.")
-            return
-        
-        # --- Step 6: Send to Gemini with a Prompt ---
-        screen_width, screen_height = pyautogui.size()
-        prompt = f"""
-        Analyze the screenshot of the web page. The screen resolution is {screen_width}x{screen_height}.
-        Your task is to identify all interactive elements, including buttons, links, and text input fields.
+        for i in range(self.max_iterations):
+            print(f"--- Iteration {i+1} ---")
 
-        Provide the output as a JSON object with a single key "elements".
-        The value of "elements" should be a list of objects. Each object must have:
-        1. "label": The text content or a short description of the element (e.g., "Submit Information", "Your Name").
-        2. "type": The type of element, which must be one of the following strings: "button", "link", or "input".
-        3. "box_2d": The bounding box coordinates as a list of four numbers [x_min, y_min, x_max, y_max].
+            # --- Step 1: Take a Screenshot ---
+            self.take_screenshot()
 
-        Return only the raw JSON object, without any surrounding text, explanations, or markdown formatting.
-        """
-        print("Prompting Gemini...")
-        gemini_response = self.ask_gemini_about_image(image_part, prompt)
-        
-        if gemini_response:
-            print("\n--- Gemini Response ---")
-            print(gemini_response)
-            print("-----------------------\n")
-        if not gemini_response:
-            print("Did not receive a response from Gemini. Aborting.")
-            return
-
-        # --- Step 7: Parse Response and Get Coordinates ---
-        interactive_elements = self.parse_and_process_response(gemini_response, (screen_width, screen_height))
-
-        if interactive_elements:
-            print("\n--- Identified Interactive Elements (with Pixel Coords) ---")
-            for element in interactive_elements:
-                print(element)
-            print("----------------------------------------------------------\n")
-        else:
-            print("Could not identify any interactive elements from the response.")
-
-        # --- Step 8: Decide and Perform Action ---
-        print("\n--- Identified Interactive Elements ---")
-        for i, element in enumerate(interactive_elements):
-            print(f"{i+1}: Label='{element.get('label')}', Type='{element.get('type')}'")
-        print("-------------------------------------\n")
-
-        try:
-            choice_str = input("Enter the number of the element to interact with (or 'q' to quit): ")
-            if choice_str.lower() == 'q':
-                print("Quitting.")
+            # --- Step 2: Convert Screenshot for Gemini ---
+            image_part = self.get_screenshot_as_gemini_part()
+            if not image_part:
+                print("Agent run failed: Could not prepare screenshot.")
                 return
 
-            choice = int(choice_str) - 1
-            if 0 <= choice < len(interactive_elements):
-                print("Action will be performed in 3 seconds...")
-                time.sleep(3)
-                chosen_element = interactive_elements[choice]
+            # --- Step 3: Send to Gemini with a Prompt ---
+            screen_width, screen_height = pyautogui.size()
+            
+            print("\n--- History for Gemini ---")
+            for item in self.history:
+                print(item)
+            print("--------------------------\n")
+            
+            prompt = self.construct_prompt(screen_width, screen_height)
+            
+            print("Prompting Gemini...")
+            gemini_response = self.ask_gemini_about_image(image_part, prompt)
+            
+            if gemini_response:
+                print("\n--- Gemini Response ---")
+                print(gemini_response)
+                print("-----------------------\n")
+            if not gemini_response:
+                print("Did not receive a response from Gemini. Aborting.")
+                return
+
+            # --- Step 4: Parse Response and Get Coordinates ---
+            interactive_elements = self.parse_and_process_response(gemini_response, (screen_width, screen_height))
+
+            if not interactive_elements:
+                print("Could not identify any interactive elements from the response. Ending run.")
+                return
+
+            # --- Step 5: Decide and Perform Action ---
+            chosen_element, thought = self.decide_next_action(interactive_elements)
+
+            if chosen_element:
+                # Add structured history entries
+                history_entry = f"Iteration {i+1}: \nThought: {thought}\nAction: "
                 
                 text_to_type = None
                 if chosen_element.get("type") == "input":
-                    text_to_type = input("Enter the text to type into the field: ")
+                    # For now, we'll just use a placeholder. This can be improved later.
+                    text_to_type = "hello world"
+                    history_entry += f"Typing '{text_to_type}' into '{chosen_element.get('label')}'."
+                else:
+                    history_entry += f"Clicking '{chosen_element.get('label')}'."
+
+                self.history.append(history_entry)
 
                 self.perform_action(chosen_element, text_to_type)
                 
                 print("\nAction completed. Pausing for 2 seconds to observe result...")
                 time.sleep(2)
-                print("Agent run finished.")
-
             else:
-                print("Invalid choice.")
-        except ValueError:
-            print("Invalid input. Please enter a number.")
+                print("Gemini could not decide on an action. Ending run.")
+                return
+
+        print("Maximum iterations reached. Ending agent run.")
 
 
 def main():
@@ -234,7 +325,8 @@ def main():
     #    if 'generateContent' in m.supported_generation_methods:
     #        print(m.name)
 
-    agent.run()
+    user_prompt = input("Please tell me what you want to do on the website: ")
+    agent.run(user_prompt)
 
 
 if __name__ == "__main__":
