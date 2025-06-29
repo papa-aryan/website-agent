@@ -131,6 +131,74 @@ class TestWebAgent(unittest.TestCase):
         # 3. Assert the result
         self.assertIsNone(response)
 
+    def test_parse_and_process_response_success(self):
+        """
+        Tests successful parsing of a valid JSON response and correct coordinate conversion.
+        """
+        print("\n[Debug] Starting test_parse_and_process_response_success...")
+        response_text = """
+        {
+            "elements": [
+                {
+                    "label": "Go to Form",
+                    "type": "link",
+                    "box_2d": [100, 200, 300, 400]
+                }
+            ]
+        }
+        """
+        screen_size = (2000, 1000) # Use easy-to-calculate numbers
+        
+        elements = self.agent.parse_and_process_response(response_text, screen_size)
+        
+        self.assertEqual(len(elements), 1)
+        element = elements[0]
+        self.assertIn("pixel_box", element)
+        # Expected: x_min = (100/1000)*2000=200, y_min = (200/1000)*1000=200, etc.
+        self.assertEqual(element["pixel_box"], [200, 200, 600, 400])
+
+    def test_parse_and_process_response_malformed_json(self):
+        """
+        Tests that the method returns an empty list for malformed JSON.
+        """
+        print("\n[Debug] Starting test_parse_and_process_response_malformed_json...")
+        response_text = '{"elements": [ "label": "bad json" }'
+        elements = self.agent.parse_and_process_response(response_text, (1920, 1080))
+        self.assertEqual(elements, [])
+
+    def test_parse_and_process_response_with_markdown(self):
+        """
+        Tests that the method correctly parses JSON wrapped in markdown.
+        """
+        print("\n[Debug] Starting test_parse_and_process_response_with_markdown...")
+        response_text = """
+        ```json
+        {
+            "elements": [
+                {"label": "A button", "type": "button", "box_2d": [500, 500, 600, 600]}
+            ]
+        }
+        ```
+        """
+        elements = self.agent.parse_and_process_response(response_text, (1000, 1000))
+        self.assertEqual(len(elements), 1)
+        self.assertEqual(elements[0]["pixel_box"], [500, 500, 600, 600])
+
+    def test_parse_and_process_response_missing_box(self):
+        """
+        Tests that elements without a 'box_2d' are handled gracefully.
+        """
+        print("\n[Debug] Starting test_parse_and_process_response_missing_box...")
+        response_text = """
+        {
+            "elements": [
+                {"label": "No box here", "type": "link"}
+            ]
+        }
+        """
+        elements = self.agent.parse_and_process_response(response_text, (1920, 1080))
+        self.assertEqual(len(elements), 1)
+        self.assertNotIn("pixel_box", elements[0])
 
 if __name__ == '__main__':
     unittest.main()
