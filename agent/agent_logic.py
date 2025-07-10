@@ -190,6 +190,8 @@ Review the action history carefully. Has the objective already been accomplished
 The objective may require multiple steps and navigating through different pages (like a search function).
 Think step-by-step. If you don't see an element that directly accomplishes the objective, choose one that is a logical step towards it (e.g., a 'Next' button, a relevant link like 'Buttons Page', or a menu). If you get stuck, you can usually return to the homepage too to start over and explore a different branch.
 
+IMPORTANT: You MUST respond with ONLY a JSON object. No markdown, no extra text.
+
 Please provide your response as a JSON object with two keys:
 1. "thought": A brief explanation of your reasoning.
 2. "chosen_element_label": The exact label of the element you've chosen from the list above.
@@ -201,7 +203,7 @@ Example:
 }}
 
 If you think the objective has been met, please return an empty JSON object.
-Return only the raw JSON object.
+RESPOND WITH ONLY THE JSON OBJECT.
 """
         print("Asking Gemini to decide on the next action...")
         response_text = self.ask_gemini_text_only(prompt)
@@ -234,6 +236,32 @@ Return only the raw JSON object.
             print(f"Error parsing decision response: {e}")
             print(f"Raw response was: {response_text}")
             return None, None
+
+    def determine_text_to_type(self, element, objective):
+        """
+        Asks Gemini what text should be typed into an input field based on the objective.
+        """
+        field_label = element.get('label', 'input field')
+        prompt = f"""
+    User's objective: {objective}
+
+    I need to fill in an input field labeled: "{field_label}"
+
+    Based on the user's objective, what specific text should I type into this field?
+    Extract the relevant information from the objective and respond with ONLY the text to type.
+    Do not include quotes, explanations, or formatting - just the raw text.
+
+    Examples:
+    - If objective is "fill name with John" and field is "Name", respond: John
+    - If objective is "search for cats" and field is "search" or a navigation bar on google, respond: cats
+    - If objective is "send message hello" and field is "message" or a messaging text box, respond: hello
+    """
+        
+        response = self.ask_gemini_text_only(prompt)
+        if response:
+            return response.strip().strip('"\'')  # Remove quotes and whitespace
+        else:
+            return "test"  # Fallback
 
     def run(self, user_prompt):
         """
@@ -295,8 +323,8 @@ Return only the raw JSON object.
                 
                 text_to_type = None
                 if chosen_element.get("type") == "input":
-                    # For now, we'll just use a placeholder. This can be improved later.
-                    text_to_type = "hello world"
+                    # Ask Gemini what to type based on the field and objective
+                    text_to_type = self.determine_text_to_type(chosen_element, self.history[0])
                     history_entry += f"Typing '{text_to_type}' into '{chosen_element.get('label')}'."
                 else:
                     history_entry += f"Clicking '{chosen_element.get('label')}'."
@@ -312,7 +340,6 @@ Return only the raw JSON object.
                 return
 
         print("Maximum iterations reached. Ending agent run.")
-
 
 def main():
     """
